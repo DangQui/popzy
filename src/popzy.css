@@ -40,10 +40,13 @@
   color: #666;
   background: #ebebeb;
   font-size: 2rem;
+  border: none;
+  outline: none;
 }
 
 .popzy__close:hover {
   color: #333;
+  cursor: pointer;
 }
 
 .popzy__content {

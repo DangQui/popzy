@@ -3,9 +3,34 @@ Popzy.elements = [];
 
 // Hàm khởi tạo constructor của lớp Modal, nhận tham số options để cấu hình modal
 function Popzy(options = {}) {
+  if (!options.content && !options.templateId) {
+    console.error("You must provide one of 'content' or 'templateId.");
+    return;
+  }
+
+  if (options.content && options.templateId) {
+    options.templateId = null;
+    console.warn(
+      "Both 'content' and 'templateId' are specified. 'content' will take precedence, and 'templateId' will be ignored."
+    );
+  }
+
+  // Lấy phần tử <template> từ DOM dựa trên templateId được cung cấp trong options
+  if (options.templateId) {
+    this.template = document.querySelector(`#${options.templateId}`);
+
+    // Nếu template không tồn tại, ghi log lỗi và thoát hàm
+    if (!this.template) {
+      console.error(`#${options.templateId} does not exist!`);
+      return;
+    }
+  }
+
   // Gôp các tùy chọn mặc định với các tùy chọn được truyền từ tham số options
   this.opt = Object.assign(
     {
+      enableScrollLock: true,
+      scrollLockTarget: () => document.body,
       destroyOnClose: true, // Xóa modal khỏi DOM khi đóng
       footer: false, // Không hiển thị footer mặc định
       cssClass: [], // Mảng các class CSS tùy chỉnh cho modal
@@ -14,15 +39,7 @@ function Popzy(options = {}) {
     options
   );
 
-  // Lấy phần tử <template> từ DOM dựa trên templateId được cung cấp trong options
-  this.template = document.querySelector(`#${this.opt.templateId}`);
-
-  // Nếu template không tồn tại, ghi log lỗi và thoát hàm
-  if (!this.template) {
-    console.error(`${this.opt.templateId} does not exist!`);
-    return;
-  }
-
+  this.content = this.opt.content;
   // Lấy danh sách các phương thức đóng modal từ options
   const { closeMethods } = this.opt;
   // Các cờ (flags) để xác định xem modal có thể đóng theo cách nào
@@ -40,7 +57,13 @@ function Popzy(options = {}) {
 // Phương thức xây dựng cấu trúc DOM của modal
 Popzy.prototype._build = function () {
   // Sao chép nội dung từ template để sử dụng trong modal
-  const content = this.template.content.cloneNode(true);
+  const contentNode = this.content
+    ? document.createElement("div")
+    : this.template.content.cloneNode(true);
+
+  if (this.content) {
+    contentNode.innerHTML = this.content;
+  }
 
   // Tạo phần tử backdrop (lớp phủ nền) cho modal
   this._modalBackdrop = document.createElement("div");
@@ -66,13 +89,13 @@ Popzy.prototype._build = function () {
   }
 
   // Tạo phần tử chứa nội dung chính của modal
-  const modalContent = document.createElement("div");
-  modalContent.className = "popzy__content";
+  this._modalContent = document.createElement("div");
+  this._modalContent.className = "popzy__content";
 
-  // Thêm nội dung từ template vào modalContent
-  modalContent.append(content);
-  // Thêm modalContent vào container
-  container.append(modalContent);
+  // Thêm nội dung từ template vào this._modalContent
+  this._modalContent.append(contentNode);
+  // Thêm this._modalContent vào container
+  container.append(this._modalContent);
 
   // Nếu footer được bật trong options, tạo footer cho modal
   if (this.opt.footer) {
@@ -90,6 +113,14 @@ Popzy.prototype._build = function () {
   this._modalBackdrop.append(container);
   // Thêm modalBackdrop vào body của trang
   document.body.append(this._modalBackdrop);
+};
+
+// Phương thức để đặt nội dung cho HTML content
+Popzy.prototype.setContent = function (content) {
+  this.content = content;
+  if (this._modalContent) {
+    this._modalContent.innerHTML = this.content;
+  }
 };
 
 // Phướng thức để đặt nội dung HTML cho footer
@@ -149,9 +180,17 @@ Popzy.prototype.open = function () {
   }, 0); // setTimeout đảm bảo hiệu ứng CSS được áp dụng sau khi render
 
   // Vô hiệu hóa thanh cuộn của trang web khi modal đang mở
-  document.body.classList.add("popzy--no-scroll"); // Thêm class để chặn cuộn
-  // Thêm padding để tránh dịch chuyển nội dung do danh cuộn bị chặn
-  document.body.style.paddingRight = this._getScrollbarWidth() + "px";
+  if (this.opt.enableScrollLock) {
+    const target = this.opt.scrollLockTarget();
+
+    if (this._hasScrollbar(target)) {
+      target.classList.add("popzy--no-scroll"); // Thêm class để chặn cuộn
+      const targetPadRight = parseInt(getComputedStyle(target).paddingRight);
+      // Thêm padding để tránh dịch chuyển nội dung do danh cuộn bị chặn
+      target.style.paddingRight =
+        targetPadRight + this._getScrollbarWidth() + "px";
+    }
+  }
 
   // Nếu cho phép đóng bằng lớp phủ (backdrop), thêm sự kiện click để đong modal khi nhấn
   if (this._allowBackdropClose) {
@@ -173,6 +212,17 @@ Popzy.prototype.open = function () {
 
   // Trả về phần tử modalBackdrop để có thể sử dụng thêm (nếu cần)
   return this._modalBackdrop;
+};
+
+Popzy.prototype._hasScrollbar = (target) => {
+  if ([document.documentElement, document.body].includes(target)) {
+    return (
+      document.documentElement.scrollHeight >
+        document.documentElement.clientHeight ||
+      document.body.scrollHeight > document.body.clientHeight
+    );
+  }
+  return target.scrollHeight > target.clientHeight;
 };
 
 // Phương thức xử lý sự kiện phím Escape
@@ -218,9 +268,13 @@ Popzy.prototype.close = function (destroy = this.opt.destroyOnClose) {
     }
 
     // Nếu không còn modal nào mở, bật lại thanh cuộn và xóa padding
-    if (!Popzy.elements.length) {
-      document.body.classList.remove("popzy--no-scroll");
-      document.body.style.paddingRight = "";
+    if (this.opt.enableScrollLock && !Popzy.elements.length) {
+      const target = this.opt.scrollLockTarget();
+
+      if (this._hasScrollbar(target)) {
+        target.classList.remove("popzy--no-scroll");
+        target.style.paddingRight = "";
+      }
     }
 
     // Gọi lại hàm onClose nếu options (nếu có)
